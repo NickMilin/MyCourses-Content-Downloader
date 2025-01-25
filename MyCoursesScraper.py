@@ -26,15 +26,40 @@ sign_in_button = driver.find_element(By.XPATH,'//a[@id="link1"]')
 sign_in_button.click()
 
 
-# Function to get shadow roots
-def get_shadow_root(element):
+# Function to safely get shadow root
+def expand_shadow_element(element):
     return driver.execute_script('return arguments[0].shadowRoot', element)
 
-products = WebDriverWait(driver,5).until(EC.presence_of_all_elements_located((By.XPATH, '//d2l-my-courses[@class="d2l-my-courses-widget d2l-token-receiver"]')))
 
-shadow_root_1 = driver.find_element(By.XPATH, '//d2l-my-courses[@class="d2l-my-courses-widget d2l-token-receiver"]').shadow_root
-shadow_root_2 = shadow_root_1.find_element(By.XPATH, "//d2l-my-courses-container").shadow_root
-print(shadow_root_2)
+# Wait for the initial shadow host
+host1 = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses")))
+shadow_root1 = expand_shadow_element(host1)
+
+# Traverse through each nested shadow root
+host2 = WebDriverWait(shadow_root1, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses-container")))
+shadow_root2 = expand_shadow_element(host2)
+
+host3 = WebDriverWait(shadow_root2, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-tabs")))
+host3_5 = WebDriverWait(host3, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-tab-panel#panel-search-my-enrollments")))
+host4 = WebDriverWait(host3_5, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses-content")))
+shadow_root4 = expand_shadow_element(host4)
+
+#Reroute to button
+host5 = WebDriverWait(shadow_root4, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-link#viewAllCourses")))
+driver.execute_script("arguments[0].click();", host5)
+
+
+# Now get all of the actual courses
+class_route_1 = WebDriverWait(shadow_root2, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-all-courses")))
+class_route_1_shadow = expand_shadow_element(class_route_1)
+
+class_route_2 = WebDriverWait(class_route_1_shadow, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses-card-grid")))
+class_route_2_shadow = expand_shadow_element(class_route_2)
+
+class_route_3 = WebDriverWait(class_route_2_shadow, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.course-card-grid")))
+driver.execute_script("arguments[0].scrollIntoView(true);", class_route_3)
+print(class_route_3.text)
+
 
 
 
