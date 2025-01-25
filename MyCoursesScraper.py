@@ -58,6 +58,19 @@ class_route_2_shadow = expand_shadow_element(class_route_2)
 
 class_route_3 = WebDriverWait(class_route_2_shadow, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.course-card-grid")))
 driver.execute_script("arguments[0].scrollIntoView(true);", class_route_3)
+
+enrollment_cards = class_route_3.find_elements(By.XPATH, './/d2l-enrollment-card')
+new_cards = []
+while len(enrollment_cards) != len(new_cards):
+    new_cards = enrollment_cards
+    driver.execute_script("arguments[0].scrollIntoView(true);", enrollment_cards[-2])
+    time.sleep(1)
+    enrollment_cards = class_route_3.find_elements(By.XPATH, './/d2l-enrollment-card')
+
+time.sleep(1)
+
+
+
 print(class_route_3.text)
 
 
