@@ -142,7 +142,7 @@ def blocking_download_logic(driver, progress_data):
        Runs in a separate thread to keep UI responsive.
     """
     # Set up for download
-    tmp_dir = os.getcwd() + "\\tmp"
+    tmp_dir = os.path.join(os.getcwd(), "tmp")
     os.makedirs(tmp_dir, exist_ok=True)
 
     # Local references
@@ -154,7 +154,7 @@ def blocking_download_logic(driver, progress_data):
         # Clean folder names for Windows
         cdir = os.path.join(tmp_dir, re.sub(r"[\\/:*?\"<>|.]", "", cinfo["course_name"]))  # Updated line
         os.makedirs(cdir, exist_ok=True)
-        
+
         for folder_name, folder_info in cinfo["folders"].items():
             fdir = os.path.join(cdir, re.sub(r"[\\/:*?\"<>|.]", "", folder_name))  # Updated line
             os.makedirs(fdir, exist_ok=True)
