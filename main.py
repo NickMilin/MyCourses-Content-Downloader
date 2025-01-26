@@ -194,6 +194,11 @@ def get_downloads_folder():
     else:
         raise OSError("Unsupported Operating System")
 
+def extract_course_code(course_name):
+    # Extracts the "XXXX-000" portion from the course name.
+    match = re.search(r'\b([A-Z]{4}-\d{3})\b', course_name)
+    return match.group(1) if match else ""
+
 # ------------------------------------------------------------------
 # UI SETUP
 # ------------------------------------------------------------------
@@ -207,7 +212,9 @@ status_label = ui.label("Selected courses: None | Total selected content: 0") \
 
 # Container for the course cards
 with ui.row().classes('flex flex-wrap justify-center gap-6 p-4'):
-    for course_id, course_info in course_list.items():
+    sorted_courses = sorted(course_list.items(), key=lambda x: extract_course_code(x[1]['course_name']))
+
+    for course_id, course_info in sorted_courses:
         # Pre-calculate the total content in each course
         content_count = total_content_for_course(course_id)
 
