@@ -79,7 +79,7 @@ new_cards = []
 while len(enrollment_cards) != len(new_cards):
     new_cards = enrollment_cards
     driver.execute_script("arguments[0].scrollIntoView(true);", enrollment_cards[-2])
-    time.sleep(2)
+    time.sleep(.5)
     enrollment_cards = class_route_3.find_elements(By.XPATH, './/d2l-enrollment-card')
 
 
@@ -93,7 +93,7 @@ for enrollment_card in enrollment_cards:
     enrollment_card_shadow = expand_shadow_element(enrollment_card)
     organization_name = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-organization-name")
     course_name = organization_name.text
-    if '00' in course_name:
+    if 'Winter' in course_name or 'Fall' in course_name or 'Summer' in course_name:
         course_names.append(course_name)
 
         # Only get the course image if the name is a real course
