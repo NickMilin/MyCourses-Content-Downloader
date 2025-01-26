@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from nicegui import ui
 from selenium import webdriver
+from selenium.common import NoSuchWindowException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
@@ -252,6 +253,8 @@ def extract_course_code(course_name):
 # ASYNC HANDLER FOR DOWNLOAD
 # ------------------------------------------------------------------
 async def download_files_async():
+    global sel_driver
+
     """Called when user clicks the download button; runs the blocking logic on a thread."""
     if not selected_courses:
         print("No courses selected for download.")
@@ -267,7 +270,13 @@ async def download_files_async():
 
     # Run the blocking logic in a thread
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(executor, blocking_download_logic, sel_driver, progress_data)
+    try:
+        await loop.run_in_executor(executor, blocking_download_logic, sel_driver, progress_data)
+    except NoSuchWindowException:
+        sel_driver = setup_selenium_driver()
+        host1 = MyCoursesScraper.handle_login(sel_driver)
+        sel_driver.minimize_window()
+        await loop.run_in_executor(executor, blocking_download_logic, sel_driver, progress_data)
 
     # Clean up
     hide_downloading_modal()
@@ -381,4 +390,4 @@ if __name__ == "__main__":
     setup_ui()
 
     update_status()  # Make sure initial text is correct
-    ui.run(title="MyCourses Downloads", reload=False)
+    ui.run(title="MyCourses Downloads", favicon="static/my_favicon.ico", reload=False)
