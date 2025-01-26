@@ -43,7 +43,8 @@ course_list = {
 # MEMORY
 # ------------------------------------------------------------------
 selected_courses = set()
-
+card_frames = {}
+is_all_selected = False
 
 # ------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -72,17 +73,40 @@ def update_status():
         download_button.enable()
 
 
-def toggle_selection(course_id, card_frame):
-    if course_id in selected_courses:
+def toggle_selection(cid, cframe):
+    if cid in selected_courses:
         # Unselect
-        selected_courses.remove(course_id)
+        selected_courses.remove(cid)
         # Remove highlight styling
-        card_frame.classes(remove="ring-4 ring-blue-500 shadow-xl")
+        cframe.classes(remove="ring-4 ring-blue-500 shadow-xl")
     else:
         # Select
-        selected_courses.add(course_id)
+        selected_courses.add(cid)
         # Add highlight styling
-        card_frame.classes(add="ring-4 ring-blue-500 shadow-xl")
+        cframe.classes(add="ring-4 ring-blue-500 shadow-xl")
+    update_status()
+
+# The new function that toggles ALL courses  (NEW)
+def toggle_all_courses():
+    global is_all_selected
+
+    # If not all selected yet, then select them all
+    if not is_all_selected:
+        for cid, cf in card_frames.items():
+            # Only add if it's not already selected
+            if cid not in selected_courses:
+                toggle_selection(cid, cf)
+        select_all_btn.text = "Deselect All"
+        is_all_selected = True
+
+    # Otherwise, deselect them all
+    else:
+        for cid, cf in card_frames.items():
+            if cid in selected_courses:
+                toggle_selection(cid, cf)
+        select_all_btn.text = "Select All"
+        is_all_selected = False
+
     update_status()
 
 def download_files():
@@ -188,6 +212,7 @@ with ui.row().classes('flex flex-wrap justify-center gap-6 p-4'):
         content_count = total_content_for_course(course_id)
 
         with ui.card().classes('w-64 p-0 hover:shadow-lg transition-shadow cursor-pointer') as card_frame:
+            card_frames[course_id] = card_frame
             with ui.element('div').classes('relative w-full h-40 overflow-hidden'):
                 ui.image(course_info['thumbnail_link']) \
                     .classes('object-cover w-full h-full')
@@ -211,7 +236,9 @@ with ui.footer().classes('p-4'):
     download_button = ui.button(
         f"Download {total_selected_content()} file(s)",
         on_click=download_files
-    ).props('color=primary')
+    ).props('color=secondary')
+    select_all_btn = ui.button("Select All", on_click=toggle_all_courses) \
+        .props('color=primary')
 
 if __name__ == "__main__":
     update_status()  # Make sure initial text is correct
