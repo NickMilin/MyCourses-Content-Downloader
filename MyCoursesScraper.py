@@ -68,14 +68,13 @@ while len(enrollment_cards) != len(new_cards):
     time.sleep(0.5)
     enrollment_cards = class_route_3.find_elements(By.XPATH, './/d2l-enrollment-card')
 
-time.sleep(0.5)
-#print(class_route_3.text)
 
 # Get all the course Titles
 course_names = []
-
 #Get all the urls for the MyCourses images
 image_urls = []
+# Get the course number
+course_numbers = []
 for enrollment_card in enrollment_cards:
     enrollment_card_shadow = expand_shadow_element(enrollment_card)
     organization_name = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-organization-name")
@@ -84,10 +83,9 @@ for enrollment_card in enrollment_cards:
         course_names.append(course_name)
 
         # Only get the course image if the name is a real course
-        enrollment_card_shadow = expand_shadow_element(enrollment_card)
         organization_image = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-organization-image")
         organization_image_shadow = expand_shadow_element(organization_image)
-        course_image = organization_image_shadow.find_element(By.CSS_SELECTOR, "d2l-course-image")
+        course_image = WebDriverWait(organization_image_shadow, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-course-image")))
         course_image_shadow = expand_shadow_element(course_image)
         # Get the image used in the course
         img_element = course_image_shadow.find_element(By.CSS_SELECTOR, "img.shown")
@@ -96,25 +94,38 @@ for enrollment_card in enrollment_cards:
         filename = re.split(" ", src_url)[-2]
         image_urls.append(filename)
 
+
+        # Get the course number
+        # 3. Find the nested d2l-card inside the enrollment card's shadow DOM
+        d2l_card = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-card")
+        # 4. Expand d2l-card's shadow root
+        d2l_card_shadow = expand_shadow_element(d2l_card)
+        # 5. Extract the link from the <a> tag inside the card's shadow DOM
+        link_element = d2l_card_shadow.find_element(By.CSS_SELECTOR, "a[href]")
+        course_url = link_element.get_attribute("href")
+        course_number = re.split('/',course_url)[-1]
+        course_numbers.append(course_number)
+
+
+
 print(course_names)
 print(image_urls)
+print(course_numbers)
 
-# Now go into the web pages
-driver.execute_script("arguments[0].click();", enrollment_cards[0])
+print(len(course_names))
+print(len(image_urls))
+print(len(course_numbers))
 
-# Now get go into one of the enrolled course
-enrollment_card_shadow = expand_shadow_element(enrollment_cards[0])
-# 3. Find the nested d2l-card inside the enrollment card's shadow DOM
-d2l_card = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-card")
 
-# 4. Expand d2l-card's shadow root
-d2l_card_shadow = expand_shadow_element(d2l_card)
+courses_dict = {}
+for i in range(len(course_names)):
+    courses_dict[course_numbers[i]] = {
+            "course_name": course_names[i],
+            "thumbnail_link": image_urls[i],
+            "folders": "folder name"
+        }
 
-# 5. Extract the link from the <a> tag inside the card's shadow DOM
-link_element = d2l_card_shadow.find_element(By.CSS_SELECTOR, "a[href]")
-course_url = link_element.get_attribute("href")
-
-print(course_url)
+print(courses_dict)
 
 '''
 # 6. Navigate to the extracted URL
