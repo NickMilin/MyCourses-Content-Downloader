@@ -292,13 +292,17 @@ def update_progress_timer():
         total = progress_data['total_files']
         if total > 0:
             downloaded = progress_data['downloaded_count']
-            progress_bar.value = round(downloaded / total, 2)
+            progress = downloaded / total
+            progress_bar.value = round(progress, 2)
+            # Update percentage label
+            percentage = int(progress * 100)
+            progress_percent.text = f"{percentage}%"
         else:
             progress_bar.value = 0
+            progress_percent.text = "0%"
     else:
-        # Not in progress => reset or keep at 0
-        # (You could hide the bar if you like; we'll keep it as is.)
-        pass
+        progress_bar.value = 0
+        progress_percent.text = "0%"
 
 ui.timer(interval=0.2, active=True, callback=update_progress_timer)
 
@@ -324,12 +328,13 @@ def show_success_modal(zip_path):
 # ------------------------------------------------------------------
 def setup_ui():
     global status_label, download_button, select_all_btn
-    global downloading_modal, success_modal, progress_bar, success_label
+    global downloading_modal, success_modal, progress_bar, progress_percent, success_label
 
     # Create modals for "Downloading..." and "Success!"
     with ui.dialog().props('persistent') as downloading_modal, ui.card().classes("p-4"):
         ui.label("Downloading in progress...").classes("text-lg font-semibold mb-2")
         progress_bar = ui.linear_progress(value=0).props("color=blue striped").classes("w-full")
+        progress_percent = ui.label("0%").classes("text-center text-lg font-bold")  # Added percentage label
 
     with ui.dialog() as success_modal, ui.card().classes("p-4"):
         ui.label("Download Complete!").classes("text-lg font-semibold mb-2")
