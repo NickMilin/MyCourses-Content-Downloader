@@ -117,10 +117,10 @@ def download_files():
 
     for cid in selected_courses:  # Use selected_courses instead of course_list
         cinfo = course_list[cid]
-        cdir = tmp_dir+"\\"+cinfo["course_name"]
+        cdir = tmp_dir+"\\"+re.sub(r"[\\/:*?\"<>|.]", "", cinfo["course_name"])
         os.makedirs(cdir, exist_ok=True)
         for folder_name, folder_info in cinfo["folders"].items():
-            fdir = cdir+"\\"+folder_name
+            fdir = cdir+"\\"+re.sub(r"[\\/:*?\"<>|.]", "", folder_name)
             os.makedirs(fdir, exist_ok=True)
             for file_id in folder_info:
                 driver.get("https://mycourses2.mcgill.ca/d2l/le/content/"+str(cid)+"/topics/files/download/"+file_id+"/DirectFileTopicDownload")
@@ -199,7 +199,9 @@ with ui.row().classes('flex flex-wrap justify-center gap-6 p-4'):
                     ui.label(f"{content_count} file{'s' if content_count != 1 else ''}")
 
             ui.label(course_info['course_name']) \
-                .classes('text-center text-lg font-semibold size-auto truncate pb-[16px] ml-[5px]')
+                .classes(
+                'text-lg font-semibold truncate overflow-hidden whitespace-nowrap w-[256px] pb-[16px] pl-[8px] pr-[8px]') \
+                .style('text-overflow: ellipsis;')
 
             card_frame.on('click', lambda e, cid=course_id, cf=card_frame: toggle_selection(cid, cf))
 
