@@ -1,3 +1,5 @@
+import re
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -69,6 +71,25 @@ while len(enrollment_cards) != len(new_cards):
 
 time.sleep(1)
 print(class_route_3.text)
+
+
+#Get all the urls for the MyCourses images
+image_urls = []
+for enrollment_card in enrollment_cards:
+    enrollment_card_shadow = expand_shadow_element(enrollment_card)
+
+    organization_image = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-organization-image")
+    organization_shadow = expand_shadow_element(organization_image)
+    course_image = organization_shadow.find_element(By.CSS_SELECTOR, "d2l-course-image")
+    course_image_shadow = expand_shadow_element(course_image)
+    # Get the image used in the course
+    img_element = course_image_shadow.find_element(By.CSS_SELECTOR, "img.shown")
+    src_url = img_element.get_attribute("srcset")
+    # Extract the filename from the URL
+    filename = re.split(" ", src_url)[-2]
+    image_urls.append(filename)
+
+print(image_urls)
 
 # Now go into the web pages
 driver.execute_script("arguments[0].click();", enrollment_cards[0])
