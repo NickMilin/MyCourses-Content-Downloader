@@ -59,6 +59,8 @@ executor = ThreadPoolExecutor(max_workers=1)
 # ------------------------------------------------------------------
 # HELPER FUNCTIONS
 # ------------------------------------------------------------------
+# ... [Previous imports and code remain unchanged] ...
+
 def setup_selenium_driver():
     tmp_dir = os.path.join(os.getcwd(), "tmp")
 
@@ -69,9 +71,13 @@ def setup_selenium_driver():
         "directory_upgrade": True,
         "detach": True
     }
-    options.add_experimental_option("prefs", prefs)  # Prevents the browser from closing automatically
+    options.add_experimental_option("prefs", prefs)
 
-    path = config.driverPath
+    # Add macOS specific options to handle permissions and browser setup
+    options.add_argument("--no-sandbox")  # Bypass OS security model
+    options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+
+    path = config.driverPath  # Ensure this points to the correct chromedriver path on macOS
     service = Service(path)
     driver = webdriver.Chrome(service=service, options=options)
 
@@ -145,18 +151,30 @@ def blocking_download_logic(driver, progress_data):
     tmp_dir = os.path.join(os.getcwd(), "tmp")
     os.makedirs(tmp_dir, exist_ok=True)
 
+    # Clear existing files in tmp directory
+    for filename in os.listdir(tmp_dir):
+        file_path = os.path.join(tmp_dir, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print(f'Failed to delete {file_path}. Reason: {e}')
+
     # Local references
     total_files = progress_data['total_files']
     downloaded_count = 0
 
     for cid in selected_courses:
         cinfo = course_list[cid]
-        # Clean folder names for Windows
-        cdir = os.path.join(tmp_dir, re.sub(r"[\\/:*?\"<>|.]", "", cinfo["course_name"]))  # Updated line
+        # Clean folder names (preserve dots)
+        cdir = os.path.join(tmp_dir, re.sub(r'[\\/:*?"<>|]', '', cinfo["course_name"]))  # Removed dot from regex
         os.makedirs(cdir, exist_ok=True)
 
         for folder_name, folder_info in cinfo["folders"].items():
-            fdir = os.path.join(cdir, re.sub(r"[\\/:*?\"<>|.]", "", folder_name))  # Updated line
+            # Clean folder names (preserve dots)
+            fdir = os.path.join(cdir, re.sub(r'[\\/:*?"<>|]', '', folder_name))  # Removed dot from regex
             os.makedirs(fdir, exist_ok=True)
 
             for file_id in folder_info:
@@ -165,12 +183,14 @@ def blocking_download_logic(driver, progress_data):
                     f"https://mycourses2.mcgill.ca/d2l/le/content/{cid}/topics/files/download/{file_id}/DirectFileTopicDownload"
                 )
 
+                # Add a sleep to allow files to download
+                time.sleep(0.05)
                 # Wait until the browser finishes partial downloads
                 while any(
                     (filename.endswith(".crdownload") or filename.endswith(".tmp"))
                     for filename in os.listdir(tmp_dir)
                 ):
-                    time.sleep(0.01)
+                    time.sleep(0.1)  # Slightly longer sleep to reduce CPU usage
 
                 # Move the downloaded file from tmp_dir to the correct folder
                 move_latest_file(tmp_dir, fdir)
