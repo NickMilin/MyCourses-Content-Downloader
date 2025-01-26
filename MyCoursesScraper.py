@@ -17,7 +17,8 @@ def get_mycourses_data(driver):
     website = 'https://mycourses2.mcgill.ca/d2l/loginh/'
     driver.get(website)
     driver.maximize_window()
-    
+
+
     # Auto click the sign-in button
     sign_in_button = driver.find_element(By.XPATH,'//a[@id="link1"]')
     sign_in_button.click()
@@ -89,7 +90,7 @@ def get_mycourses_data(driver):
             course_image = WebDriverWait(organization_image_shadow, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-course-image")))
             course_image_shadow = expand_shadow_element(driver, course_image)
             # Get the image used in the course
-            img_element = course_image_shadow.find_element(By.CSS_SELECTOR, "img.shown")
+            img_element = WebDriverWait(course_image_shadow, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "img.shown")))
             src_url = img_element.get_attribute("srcset")
             # Extract the filename from the URL
             filename = re.split(" ", src_url)[-2]
@@ -127,7 +128,7 @@ def get_mycourses_data(driver):
             driver.get(api_url)
     
             # Wait for content to load and get raw JSON
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 2).until(
                 lambda d: d.find_element(By.TAG_NAME, "pre")
             )
             raw_json = driver.find_element(By.TAG_NAME, "pre").text
@@ -135,14 +136,14 @@ def get_mycourses_data(driver):
     
             parser = JSONParser(course_data)
             folder = parser.get_dict()
-    
-            # print(folder)
-    
+
             courses_dict[int(course_codes[i])] = {
                     "course_name": course_names[i],
                     "thumbnail_link": image_urls[i],
                     "folders": folder
                 }
+
+            print(courses_dict[int(course_codes[i])])
     
         except Exception as e:
             print(f"Failed to process {course_codes[i]}: {str(e)}")
@@ -150,3 +151,4 @@ def get_mycourses_data(driver):
 
     driver.minimize_window()
     return courses_dict
+

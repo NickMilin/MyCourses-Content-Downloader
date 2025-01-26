@@ -17,10 +17,10 @@ class JSONParser:
             if not (title := module.get('Title')):
                 continue
 
-            # Collect valid identifiers from topics
+            # Collect valid identifiers from topics with TypeIdentifier == 'File'
             self.result[title] = [
                 t['Identifier'] for t in module.get('Topics', [])
-                if 'Identifier' in t
+                if t.get('TypeIdentifier') == 'File' and 'Identifier' in t
             ]
 
             # Process nested modules
@@ -41,3 +41,10 @@ class JSONParser:
         """Alternative constructor from file path"""
         with open(file_path, 'r') as f:
             return cls(json.load(f))
+
+
+# Example usage
+if __name__ == "__main__":
+    json_data = """<your JSON string here>"""
+    parser = JSONParser.from_string(json_data)
+    print(parser.get_dict())
