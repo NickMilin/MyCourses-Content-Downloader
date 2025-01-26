@@ -79,7 +79,7 @@ def toggle_selection(course_id, card_frame):
     update_status()
 
 def download_files():
-    os.mkdir("tmp")
+    os.makedirs("tmp", exist_ok=True)
     tmp_dir = os.getcwd()+"\\tmp"
     options = webdriver.ChromeOptions()
     prefs = {
@@ -104,13 +104,18 @@ def download_files():
     host1 = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses")))
 
     for cid, cinfo in course_list.items():
-        for folders in cinfo["folders"].values():
-            for file_id in folders:
+        cdir = tmp_dir+"\\"+cinfo["course_name"]
+        os.makedirs(cdir, exist_ok=True)
+        for folder_name, folder_info in cinfo["folders"].items():
+            fdir = cdir+"\\"+folder_name
+            os.makedirs(fdir, exist_ok=True)
+            for file_id in folder_info:
                 driver.get("https://mycourses2.mcgill.ca/d2l/le/content/"+str(cid)+"/topics/files/download/"+file_id+"/DirectFileTopicDownload")
-                print(cid)
 
-    while any([(filename.endswith(".crdownload") or filename.endswith(".tmp")) for filename in os.listdir(tmp_dir)]):
-        time.sleep(0.1)
+                while any([(filename.endswith(".crdownload") or filename.endswith(".tmp")) for filename in
+                           os.listdir(tmp_dir)]):
+                    time.sleep(0.01)
+                move_latest_file(tmp_dir, fdir)
 
     downloads_folder = get_downloads_folder()
     zip_path = downloads_folder+"/combined_files.zip"  # Replace with the desired zip file path
@@ -120,14 +125,27 @@ def download_files():
         zip_path = downloads_folder+"/combined_files ("+str(file_counter)+").zip"
         file_counter += 1
 
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for file_name in os.listdir(tmp_dir):
-            file_path = os.path.join(tmp_dir, file_name)
-            zipf.write(file_path, os.path.basename(file_path))
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(tmp_dir):
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                arcname = os.path.relpath(file_path, start=tmp_dir)
+                zipf.write(file_path, arcname)
 
     shutil.rmtree(tmp_dir)
-
     print(f"Files have been downloaded and zipped at {zip_path}")
+
+def move_latest_file(download_dir, target_dir):
+    # Find the newest file in the directory
+    files = [os.path.join(download_dir, f) for f in os.listdir(download_dir)]
+    files = [f for f in files if os.path.isfile(f)]
+    if not files:
+        return  # No file found
+
+    newest_file = max(files, key=os.path.getctime)
+
+    # Move it
+    shutil.move(newest_file, target_dir)
 
 def get_downloads_folder():
     if platform.system() == "Windows":
