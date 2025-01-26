@@ -9,6 +9,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+
 import config
 import time
 
@@ -34,7 +36,8 @@ def expand_shadow_element(element):
 
 
 # Wait for the initial shadow host
-host1 = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses")))
+# Give the user 100 seconds to log into mycourses before crashing (feature not a bug)
+host1 = WebDriverWait(driver, 100).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses")))
 shadow_root1 = expand_shadow_element(host1)
 
 # Traverse through each nested shadow root
@@ -46,11 +49,21 @@ host3_5 = WebDriverWait(host3, 20).until(EC.presence_of_element_located((By.CSS_
 host4 = WebDriverWait(host3_5, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses-content")))
 shadow_root4 = expand_shadow_element(host4)
 
-#Reroute to button
+#Reroute to viewAllCourses button
 host5 = WebDriverWait(shadow_root4, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-link#viewAllCourses")))
 driver.execute_script("arguments[0].click();", host5)
 
+# ------------------ NOW ON viewAllCourses PAGE OF MYCOURSES ------------------
 
+# ------------------ NOW SELECTING ALL BUTTON ON viewAllCourses PAGE OF MYCOURSES ------------------
+shadow_root3 = expand_shadow_element(host3)
+all_button = WebDriverWait(shadow_root3, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'd2l-tab-internal[title="All"]')))
+
+# Use ActionChains to press the all tab
+actions = ActionChains(driver)
+actions.move_to_element(all_button).click().perform()
+
+# ------------------ NOW LOADING ALL OF THE COURSES IN viewAllCourses PAGE OF MYCOURSES ------------------
 # Now get all of the actual courses
 class_route_1 = WebDriverWait(shadow_root2, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-all-courses")))
 class_route_1_shadow = expand_shadow_element(class_route_1)
@@ -66,7 +79,7 @@ new_cards = []
 while len(enrollment_cards) != len(new_cards):
     new_cards = enrollment_cards
     driver.execute_script("arguments[0].scrollIntoView(true);", enrollment_cards[-2])
-    time.sleep(0.5)
+    time.sleep(2)
     enrollment_cards = class_route_3.find_elements(By.XPATH, './/d2l-enrollment-card')
 
 
@@ -135,8 +148,8 @@ for i in range(len(course_names)):
 
         parser = JSONParser(course_data)
         folder = parser.get_dict()
-        print(folder)
 
+        print(folder)
 
         courses_dict[course_codes[i]] = {
                 "course_name": course_names[i],
@@ -149,20 +162,4 @@ for i in range(len(course_names)):
         continue
 
 print(courses_dict)
-
-'''
-# 6. Navigate to the extracted URL
-driver.get(course_url)
-
-
-navigation_list = driver.find_elements(By.XPATH, '//div[@class="d2l-navigation-s-item"]')
-
-'''
-
-
-
-
-
-
-
 
