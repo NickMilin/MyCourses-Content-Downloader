@@ -64,6 +64,12 @@ def update_status():
     )
     download_button.text = f"Download {total_selected_content()} file(s)"
 
+    # Disable the download button if no content is selected
+    if total_selected_content() == 0:
+        download_button.disable()
+    else:
+        download_button.enable()
+
 
 def toggle_selection(course_id, card_frame):
     if course_id in selected_courses:
@@ -79,8 +85,13 @@ def toggle_selection(course_id, card_frame):
     update_status()
 
 def download_files():
+    if not selected_courses:
+        print("No courses selected for download.")
+        return
+
     os.makedirs("tmp", exist_ok=True)
     tmp_dir = os.getcwd()+"\\tmp"
+
     options = webdriver.ChromeOptions()
     prefs = {
         "download.default_directory": tmp_dir,
@@ -103,7 +114,8 @@ def download_files():
     # Wait for the initial shadow host
     host1 = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses")))
 
-    for cid, cinfo in course_list.items():
+    for cid in selected_courses:  # Use selected_courses instead of course_list
+        cinfo = course_list[cid]
         cdir = tmp_dir+"\\"+cinfo["course_name"]
         os.makedirs(cdir, exist_ok=True)
         for folder_name, folder_info in cinfo["folders"].items():
