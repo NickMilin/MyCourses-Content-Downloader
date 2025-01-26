@@ -154,14 +154,9 @@ def blocking_download_logic(driver, progress_data):
         # Clean folder names for Windows
         cdir = os.path.join(tmp_dir, re.sub(r"[\\/:*?\"<>|.]", "", cinfo["course_name"]))  # Updated line
         os.makedirs(cdir, exist_ok=True)
+        
         for folder_name, folder_info in cinfo["folders"].items():
             fdir = os.path.join(cdir, re.sub(r"[\\/:*?\"<>|.]", "", folder_name))  # Updated line
-            os.makedirs(fdir, exist_ok=True)
-            for file_id in folder_info:
-                driver.get("https://mycourses2.mcgill.ca/d2l/le/content/"+str(cid)+"/topics/files/download/"+file_id+"/DirectFileTopicDownload")
-
-        for folder_name, folder_info in cinfo["folders"].items():
-            fdir = cdir + "\\" + re.sub(r"[\\/:*?\"<>|.]", "", folder_name)
             os.makedirs(fdir, exist_ok=True)
 
             for file_id in folder_info:
@@ -367,37 +362,3 @@ if __name__ == "__main__":
 
     update_status()  # Make sure initial text is correct
     ui.run(title="MyCourses Downloads", reload=False)
-    '''
-    import threading
-
-
-    def run_ui():
-        ui.run(
-            title="MyCourses Downloads",
-            reload=False,
-            show=False,
-            port=8080,
-            # Use uvicorn settings for keep-alive
-            uvicorn_run_kwargs={
-                "timeout_keep_alive": 60
-            }
-        )
-
-    ui_thread = threading.Thread(target=run_ui, daemon=True)
-    ui_thread.start()
-
-    ui_thread = threading.Thread(target=run_ui, daemon=True)
-    ui_thread.start()
-
-
-    try:
-    # Navigate to the UI
-        sel_driver.get('http://localhost:8080')
-    # Keep main thread alive
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\nShutting down gracefully...")
-    finally:
-        sel_driver.quit()
-        '''
