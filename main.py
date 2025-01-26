@@ -1,9 +1,11 @@
+import asyncio
 import os
 import re
 import shutil
 import time
 import zipfile
 import platform
+from concurrent.futures import ThreadPoolExecutor
 
 from nicegui import ui
 from selenium import webdriver
@@ -32,10 +34,27 @@ sel_driver = None
 # ------------------------------------------------------------------
 # UI ELEMENTS
 # ------------------------------------------------------------------
+downloading_modal = None
+success_modal = None
+progress_bar = None
+success_label = None
 status_label = None
 download_button = None
 select_all_btn = None
-course_container = None
+
+# ------------------------------------------------------------------
+# MULTITHREADING
+# ------------------------------------------------------------------
+# A small dictionary to share progress data between the worker thread and UI
+progress_data = {
+    'in_progress': False,
+    'downloaded_count': 0,
+    'total_files': 0,
+    'zip_path': '',  # Will store the final ZIP path for the success dialog
+}
+
+# We'll use a global executor for the blocking calls
+executor = ThreadPoolExecutor(max_workers=1)
 
 # ------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -118,35 +137,54 @@ def toggle_all_courses():
 
     update_status()
 
-def download_files(driver):
-    if not selected_courses:
-        print("No courses selected for download.")
-        return
+def blocking_download_logic(driver, progress_data):
+    """All the blocking operations (Selenium, file-moving, zipping).
+       Runs in a separate thread to keep UI responsive.
+    """
+    # Set up for download
+    tmp_dir = os.getcwd() + "\\tmp"
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    os.makedirs("tmp", exist_ok=True)
-    tmp_dir = os.getcwd()+"\\tmp"
+    # Local references
+    total_files = progress_data['total_files']
+    downloaded_count = 0
 
-    for cid in selected_courses:  # Use selected_courses instead of course_list
+    for cid in selected_courses:
         cinfo = course_list[cid]
-        cdir = tmp_dir+"\\"+re.sub(r"[\\/:*?\"<>|.]", "", cinfo["course_name"])
+        # Clean folder names for Windows
+        cdir = tmp_dir + "\\" + re.sub(r"[\\/:*?\"<>|.]", "", cinfo["course_name"])
         os.makedirs(cdir, exist_ok=True)
-        for folder_name, folder_info in cinfo["folders"].items():
-            fdir = cdir+"\\"+re.sub(r"[\\/:*?\"<>|.]", "", folder_name)
-            os.makedirs(fdir, exist_ok=True)
-            for file_id in folder_info:
-                driver.get("https://mycourses2.mcgill.ca/d2l/le/content/"+str(cid)+"/topics/files/download/"+file_id+"/DirectFileTopicDownload")
 
-                while any([(filename.endswith(".crdownload") or filename.endswith(".tmp")) for filename in
-                           os.listdir(tmp_dir)]):
+        for folder_name, folder_info in cinfo["folders"].items():
+            fdir = cdir + "\\" + re.sub(r"[\\/:*?\"<>|.]", "", folder_name)
+            os.makedirs(fdir, exist_ok=True)
+
+            for file_id in folder_info:
+                # Instruct Selenium to download the file
+                driver.get(
+                    f"https://mycourses2.mcgill.ca/d2l/le/content/{cid}/topics/files/download/{file_id}/DirectFileTopicDownload"
+                )
+
+                # Wait until the browser finishes partial downloads
+                while any(
+                    (filename.endswith(".crdownload") or filename.endswith(".tmp"))
+                    for filename in os.listdir(tmp_dir)
+                ):
                     time.sleep(0.01)
+
+                # Move the downloaded file from tmp_dir to the correct folder
                 move_latest_file(tmp_dir, fdir)
 
-    downloads_folder = get_downloads_folder()
-    zip_path = downloads_folder+"/combined_files.zip"  # Replace with the desired zip file path
-    file_counter = 1
+                # One more file completed; update progress
+                downloaded_count += 1
+                progress_data['downloaded_count'] = downloaded_count
 
+    # Zip everything in tmp and remove tmp
+    downloads_folder = get_downloads_folder()
+    zip_path = os.path.join(downloads_folder, "combined_files.zip")
+    file_counter = 1
     while os.path.isfile(zip_path):
-        zip_path = downloads_folder+"/combined_files ("+str(file_counter)+").zip"
+        zip_path = os.path.join(downloads_folder, f"combined_files ({file_counter}).zip")
         file_counter += 1
 
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -157,7 +195,10 @@ def download_files(driver):
                 zipf.write(file_path, arcname)
 
     shutil.rmtree(tmp_dir)
-    print(f"Files have been downloaded and zipped at {zip_path}")
+
+    # Store final ZIP path for the success popup
+    progress_data['zip_path'] = zip_path
+
 
 def move_latest_file(download_dir, target_dir):
     # Find the newest file in the directory
@@ -187,10 +228,83 @@ def extract_course_code(course_name):
     return match.group(1) if match else ""
 
 # ------------------------------------------------------------------
+# ASYNC HANDLER FOR DOWNLOAD
+# ------------------------------------------------------------------
+async def download_files_async():
+    """Called when user clicks the download button; runs the blocking logic on a thread."""
+    if not selected_courses:
+        print("No courses selected for download.")
+        return
+
+    # Reset progress data
+    progress_data['in_progress'] = True
+    progress_data['downloaded_count'] = 0
+    progress_data['total_files'] = total_selected_content()
+    progress_data['zip_path'] = ''
+
+    show_downloading_modal()
+
+    # Run the blocking logic in a thread
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(executor, blocking_download_logic, sel_driver, progress_data)
+
+    # Clean up
+    hide_downloading_modal()
+    show_success_modal(progress_data['zip_path'])
+    progress_data['in_progress'] = False
+
+# ------------------------------------------------------------------
+# TIMED UPDATE: PROGRESS BAR
+# ------------------------------------------------------------------
+def update_progress_timer():
+    """Periodically called to update the progress bar from shared progress data."""
+    if progress_data['in_progress']:
+        total = progress_data['total_files']
+        if total > 0:
+            downloaded = progress_data['downloaded_count']
+            progress_bar.value = round(downloaded / total, 2)
+        else:
+            progress_bar.value = 0
+    else:
+        # Not in progress => reset or keep at 0
+        # (You could hide the bar if you like; we'll keep it as is.)
+        pass
+
+ui.timer(interval=0.2, active=True, callback=update_progress_timer)
+
+# ------------------------------------------------------------------
+# MODAL CONTROLS
+# ------------------------------------------------------------------
+def show_downloading_modal():
+    progress_bar.value = 0
+    downloading_modal.open()
+
+def hide_downloading_modal():
+    downloading_modal.close()
+
+def show_success_modal(zip_path):
+    success_label.text = (
+        "All files have been downloaded and zipped!\n\n"
+        f"ZIP is located at:\n{zip_path}"
+    )
+    success_modal.open()
+
+# ------------------------------------------------------------------
 # UI SETUP
 # ------------------------------------------------------------------
 def setup_ui():
-    global status_label, download_button, select_all_btn, course_container
+    global status_label, download_button, select_all_btn
+    global downloading_modal, success_modal, progress_bar, success_label
+
+    # Create modals for "Downloading..." and "Success!"
+    with ui.dialog().props('persistent') as downloading_modal, ui.card().classes("p-4"):
+        ui.label("Downloading in progress...").classes("text-lg font-semibold mb-2")
+        progress_bar = ui.linear_progress(value=0).props("color=blue striped").classes("w-full")
+
+    with ui.dialog() as success_modal, ui.card().classes("p-4"):
+        ui.label("Download Complete!").classes("text-lg font-semibold mb-2")
+        success_label = ui.label("")
+        ui.button("Close", on_click=success_modal.close).props("color=primary")
 
     # Create a header label to display current selections:
     with ui.header().classes('justify-between items-center bg-gray-100 px-4 py-2 shadow'):
@@ -232,7 +346,7 @@ def setup_ui():
     with ui.footer().classes('p-4'):
         download_button = ui.button(
             f"Download {total_selected_content()} file(s)",
-            on_click=lambda:download_files(sel_driver)
+            on_click=download_files_async
         ).props('color=secondary')
         select_all_btn = ui.button("Select All", on_click=toggle_all_courses) \
             .props('color=primary')

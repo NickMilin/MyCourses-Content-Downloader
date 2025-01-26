@@ -147,5 +147,6 @@ def get_mycourses_data(driver):
         except Exception as e:
             print(f"Failed to process {course_codes[i]}: {str(e)}")
             continue
-    
+
+    driver.minimize_window()
     return courses_dict
