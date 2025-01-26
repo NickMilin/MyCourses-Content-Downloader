@@ -13,19 +13,21 @@ import time
 def expand_shadow_element(driver, element):
     return driver.execute_script('return arguments[0].shadowRoot', element)
 
-def get_mycourses_data(driver):
+def handle_login(driver):
     website = 'https://mycourses2.mcgill.ca/d2l/loginh/'
     driver.get(website)
     driver.maximize_window()
 
-
     # Auto click the sign-in button
-    sign_in_button = driver.find_element(By.XPATH,'//a[@id="link1"]')
+    sign_in_button = driver.find_element(By.XPATH, '//a[@id="link1"]')
     sign_in_button.click()
-    
+
     # Wait for the initial shadow host
     # Give the user 100 seconds to log into mycourses before crashing (feature not a bug)
-    host1 = WebDriverWait(driver, 100).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses")))
+    return WebDriverWait(driver, 100).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses")))
+
+def get_mycourses_data(driver):
+    host1 = handle_login(driver)
     shadow_root1 = expand_shadow_element(driver, host1)
     
     # Traverse through each nested shadow root
