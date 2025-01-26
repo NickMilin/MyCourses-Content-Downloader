@@ -13,31 +13,13 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 import config
-
+import MyCoursesScraper
 # FRONTEND
 
 # ------------------------------------------------------------------
 # DATA
 # ------------------------------------------------------------------
-course_list = {
-    779615: {
-        "course_name": "FACC 300",
-        "thumbnail_link": "https://s.brightspace.com/course-images/images/322cd582-6b20-4459-b7b9-1c92e9903c33/tile-low-density-max-size.jpg",
-        "folders": {
-            "Course Material": ["8286939", "8286940", "8286941"],
-            "Course Notes": ["8286970"]
-        }
-    },
-    762082: {
-        "course_name": "ECSE 343",
-        "thumbnail_link": "https://s.brightspace.com/course-images/images/bdcbbbed-ddab-4be9-8479-ee931512e3a0/tile-low-density-max-size.jpg",
-        "folders": {
-            "Course Outline": ["8267885"],
-            "Lecture Schedule/Handouts": ["8268066"]
-        }
-    },
-    # Add more courses as needed
-}
+course_list = {}
 
 # ------------------------------------------------------------------
 # MEMORY
@@ -45,10 +27,37 @@ course_list = {
 selected_courses = set()
 card_frames = {}
 is_all_selected = False
+sel_driver = None
+
+# ------------------------------------------------------------------
+# UI ELEMENTS
+# ------------------------------------------------------------------
+status_label = None
+download_button = None
+select_all_btn = None
+course_container = None
 
 # ------------------------------------------------------------------
 # HELPER FUNCTIONS
 # ------------------------------------------------------------------
+def setup_selenium_driver():
+    tmp_dir = os.getcwd() + "\\tmp"
+
+    options = webdriver.ChromeOptions()
+    prefs = {
+        "download.default_directory": tmp_dir,
+        "download.prompt_for_download": False,
+        "directory_upgrade": True,
+        "detach": True
+    }
+    options.add_experimental_option("prefs", prefs)  # Prevents the browser from closing automatically
+
+    path = config.driverPath
+    service = Service(path)
+    driver = webdriver.Chrome(service=service, options=options)
+
+    return driver
+
 def total_content_for_course(course_id) -> int:
     course = course_list[course_id]
     return sum(len(folder_content) for folder_content in course["folders"].values())
@@ -109,35 +118,13 @@ def toggle_all_courses():
 
     update_status()
 
-def download_files():
+def download_files(driver):
     if not selected_courses:
         print("No courses selected for download.")
         return
 
     os.makedirs("tmp", exist_ok=True)
     tmp_dir = os.getcwd()+"\\tmp"
-
-    options = webdriver.ChromeOptions()
-    prefs = {
-        "download.default_directory": tmp_dir,
-        "download.prompt_for_download": False,
-        "directory_upgrade": True,
-        "detach": True
-    }
-    options.add_experimental_option("prefs", prefs)  # Prevents the browser from closing automatically
-
-    website = 'https://mycourses2.mcgill.ca/d2l/loginh/'
-    path = config.driverPath
-    service = Service(path)
-    driver = webdriver.Chrome(service=service, options=options)
-    driver.get(website)
-
-    # Auto click the sign-in button
-    sign_in_button = driver.find_element(By.XPATH,'//a[@id="link1"]')
-    sign_in_button.click()
-
-    # Wait for the initial shadow host
-    host1 = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses")))
 
     for cid in selected_courses:  # Use selected_courses instead of course_list
         cinfo = course_list[cid]
@@ -202,51 +189,61 @@ def extract_course_code(course_name):
 # ------------------------------------------------------------------
 # UI SETUP
 # ------------------------------------------------------------------
-# Create a header label to display current selections:
-with ui.header().classes('justify-between items-center bg-gray-100 px-4 py-2 shadow'):
-    ui.label("MyCourses Downloads").classes('text-2xl font-semibold text-black')
+def setup_ui():
+    global status_label, download_button, select_all_btn, course_container
 
-# Status label for tracking which courses (and how many contents) are selected:
-status_label = ui.label("Selected courses: None | Total selected content: 0") \
-    .classes('text-lg font-medium')
+    # Create a header label to display current selections:
+    with ui.header().classes('justify-between items-center bg-gray-100 px-4 py-2 shadow'):
+        ui.label("MyCourses Downloads").classes('text-2xl font-semibold text-black')
 
-# Container for the course cards
-with ui.row().classes('flex flex-wrap justify-center gap-6 p-4'):
-    sorted_courses = sorted(course_list.items(), key=lambda x: extract_course_code(x[1]['course_name']))
+    # Status label for tracking which courses (and how many contents) are selected:
+    status_label = ui.label("Selected courses: None | Total selected content: 0") \
+        .classes('text-lg font-medium')
 
-    for course_id, course_info in sorted_courses:
-        # Pre-calculate the total content in each course
-        content_count = total_content_for_course(course_id)
+    # Container for the course cards
+    with ui.row().classes('flex flex-wrap justify-center gap-6 p-4'):
+        sorted_courses = sorted(course_list.items(), key=lambda x: extract_course_code(x[1]['course_name']))
 
-        with ui.card().classes('w-64 p-0 hover:shadow-lg transition-shadow cursor-pointer') as card_frame:
-            card_frames[course_id] = card_frame
-            with ui.element('div').classes('relative w-full h-40 overflow-hidden'):
-                ui.image(course_info['thumbnail_link']) \
-                    .classes('object-cover w-full h-full')
+        for course_id, course_info in sorted_courses:
+            # Pre-calculate the total content in each course
+            content_count = total_content_for_course(course_id)
 
-                with ui.element('div').classes(
-                        'absolute top-0 left-0 m-2 px-3 py-1 bg-gray-800 bg-opacity-70 '
-                        'text-white text-sm rounded'
-                ):
-                    ui.label(f"{content_count} file{'s' if content_count != 1 else ''}")
+            with ui.card().classes('w-64 p-0 hover:shadow-lg transition-shadow cursor-pointer') as card_frame:
+                card_frames[course_id] = card_frame
+                with ui.element('div').classes('relative w-full h-40 overflow-hidden'):
+                    ui.image(course_info['thumbnail_link']) \
+                        .classes('object-cover w-full h-full')
 
-            ui.label(course_info['course_name']) \
-                .classes(
-                'text-lg font-semibold truncate overflow-hidden whitespace-nowrap w-[256px] pb-[16px] pl-[8px] pr-[8px]') \
-                .style('text-overflow: ellipsis;')
+                    with ui.element('div').classes(
+                            'absolute top-0 left-0 m-2 px-3 py-1 bg-gray-800 bg-opacity-70 '
+                            'text-white text-sm rounded'
+                    ):
+                        ui.label(f"{content_count} file{'s' if content_count != 1 else ''}")
 
-            card_frame.on('click', lambda e, cid=course_id, cf=card_frame: toggle_selection(cid, cf))
+                ui.label(course_info['course_name']) \
+                    .classes(
+                    'text-lg font-semibold truncate overflow-hidden whitespace-nowrap w-[256px] pb-[16px] pl-[8px] pr-[8px]') \
+                    .style('text-overflow: ellipsis;')
+
+                card_frame.on('click', lambda e, cid=course_id, cf=card_frame: toggle_selection(cid, cf))
 
 
-# Footer with download button:
-with ui.footer().classes('p-4'):
-    download_button = ui.button(
-        f"Download {total_selected_content()} file(s)",
-        on_click=download_files
-    ).props('color=secondary')
-    select_all_btn = ui.button("Select All", on_click=toggle_all_courses) \
-        .props('color=primary')
+    # Footer with download button:
+    with ui.footer().classes('p-4'):
+        download_button = ui.button(
+            f"Download {total_selected_content()} file(s)",
+            on_click=lambda:download_files(sel_driver)
+        ).props('color=secondary')
+        select_all_btn = ui.button("Select All", on_click=toggle_all_courses) \
+            .props('color=primary')
 
 if __name__ == "__main__":
+    sel_driver = setup_selenium_driver()
+    course_list = MyCoursesScraper.get_mycourses_data(sel_driver)
+
+    print(course_list)
+
+    setup_ui()
+
     update_status()  # Make sure initial text is correct
     ui.run(title="MyCourses Downloads", reload=False)
