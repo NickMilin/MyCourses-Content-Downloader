@@ -138,7 +138,7 @@ for i in range(len(course_names)):
         print(folder)
 
 
-        courses_dict[course_codes[i]] = {
+        courses_dict[int(course_codes[i])] = {
                 "course_name": course_names[i],
                 "thumbnail_link": image_urls[i],
                 "folders": folder
