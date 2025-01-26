@@ -12,8 +12,6 @@ import time
 import pandas as pd
 
 # Set up Chrome options
-
-
 options = Options()
 options.add_experimental_option("detach", True)  # Prevents the browser from closing automatically
 
@@ -22,6 +20,7 @@ path = config.driverPath
 service = Service(path)
 driver = webdriver.Chrome(service=service, options=options)
 driver.get(website)
+driver.maximize_window()
 
 # Auto click the sign-in button
 sign_in_button = driver.find_element(By.XPATH,'//a[@id="link1"]')
@@ -66,29 +65,38 @@ new_cards = []
 while len(enrollment_cards) != len(new_cards):
     new_cards = enrollment_cards
     driver.execute_script("arguments[0].scrollIntoView(true);", enrollment_cards[-2])
-    time.sleep(1)
+    time.sleep(0.5)
     enrollment_cards = class_route_3.find_elements(By.XPATH, './/d2l-enrollment-card')
 
-time.sleep(1)
-print(class_route_3.text)
+time.sleep(0.5)
+#print(class_route_3.text)
 
+# Get all the course Titles
+course_names = []
 
 #Get all the urls for the MyCourses images
 image_urls = []
 for enrollment_card in enrollment_cards:
     enrollment_card_shadow = expand_shadow_element(enrollment_card)
+    organization_name = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-organization-name")
+    course_name = organization_name.text
+    if '00' in course_name:
+        course_names.append(course_name)
 
-    organization_image = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-organization-image")
-    organization_shadow = expand_shadow_element(organization_image)
-    course_image = organization_shadow.find_element(By.CSS_SELECTOR, "d2l-course-image")
-    course_image_shadow = expand_shadow_element(course_image)
-    # Get the image used in the course
-    img_element = course_image_shadow.find_element(By.CSS_SELECTOR, "img.shown")
-    src_url = img_element.get_attribute("srcset")
-    # Extract the filename from the URL
-    filename = re.split(" ", src_url)[-2]
-    image_urls.append(filename)
+        # Only get the course image if the name is a real course
+        enrollment_card_shadow = expand_shadow_element(enrollment_card)
+        organization_image = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-organization-image")
+        organization_image_shadow = expand_shadow_element(organization_image)
+        course_image = organization_image_shadow.find_element(By.CSS_SELECTOR, "d2l-course-image")
+        course_image_shadow = expand_shadow_element(course_image)
+        # Get the image used in the course
+        img_element = course_image_shadow.find_element(By.CSS_SELECTOR, "img.shown")
+        src_url = img_element.get_attribute("srcset")
+        # Extract the filename from the URL
+        filename = re.split(" ", src_url)[-2]
+        image_urls.append(filename)
 
+print(course_names)
 print(image_urls)
 
 # Now go into the web pages
