@@ -1,15 +1,16 @@
+import json
 import re
+import CourseURL
+from JSONParser import JSONParser
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
 from selenium.webdriver.common.by import By
 import config
 import time
-import pandas as pd
 
 # Set up Chrome options
 options = Options()
@@ -74,7 +75,7 @@ course_names = []
 #Get all the urls for the MyCourses images
 image_urls = []
 # Get the course number
-course_numbers = []
+course_codes = []
 for enrollment_card in enrollment_cards:
     enrollment_card_shadow = expand_shadow_element(enrollment_card)
     organization_name = enrollment_card_shadow.find_element(By.CSS_SELECTOR, "d2l-organization-name")
@@ -103,27 +104,49 @@ for enrollment_card in enrollment_cards:
         # 5. Extract the link from the <a> tag inside the card's shadow DOM
         link_element = d2l_card_shadow.find_element(By.CSS_SELECTOR, "a[href]")
         course_url = link_element.get_attribute("href")
-        course_number = re.split('/',course_url)[-1]
-        course_numbers.append(course_number)
+        course_code = re.split('/',course_url)[-1]
+        course_codes.append(course_code)
 
 
 
 print(course_names)
 print(image_urls)
-print(course_numbers)
+print(course_codes)
 
 print(len(course_names))
 print(len(image_urls))
-print(len(course_numbers))
+print(len(course_codes))
 
 
 courses_dict = {}
 for i in range(len(course_names)):
-    courses_dict[course_numbers[i]] = {
-            "course_name": course_names[i],
-            "thumbnail_link": image_urls[i],
-            "folders": "folder name"
-        }
+    try:
+        api_url = f"https://mycourses2.mcgill.ca/d2l/api/le/unstable/{course_codes[i]}/content/toc?loadDescription=true"
+
+        # Navigate to API endpoint using existing session
+        driver.get(api_url)
+
+        # Wait for content to load and get raw JSON
+        WebDriverWait(driver, 10).until(
+            lambda d: d.find_element(By.TAG_NAME, "pre")
+        )
+        raw_json = driver.find_element(By.TAG_NAME, "pre").text
+        course_data = json.loads(raw_json)
+
+        parser = JSONParser(course_data)
+        folder = parser.get_dict()
+        print(folder)
+
+
+        courses_dict[course_codes[i]] = {
+                "course_name": course_names[i],
+                "thumbnail_link": image_urls[i],
+                "folders": folder
+            }
+
+    except Exception as e:
+        print(f"Failed to process {course_codes[i]}: {str(e)}")
+        continue
 
 print(courses_dict)
 
