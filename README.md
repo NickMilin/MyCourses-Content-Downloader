@@ -28,8 +28,8 @@ To set up the MyCourses Content Downloader, follow these steps:
 
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/NickMilin/McHacks12.git
-   cd McHacks12
+   git clone https://github.com/NickMilin/MyCourses-Content-Downloader.git
+   cd MyCourses-Content-Downloader
    ```
 
 2. **Create a Virtual Environment** (optional but recommended):
