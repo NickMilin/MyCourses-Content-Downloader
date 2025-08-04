@@ -58,9 +58,7 @@ To set up the MyCourses Content Downloader, follow these steps:
 
 The downloader uses a configuration file named `config.py` to manage settings:
 
-- **Username and Password**: Your MyCourses login credentials.
-- **Courses**: A list of course identifiers to specify which courses to download materials from.
-- **Download Path**: The directory where the downloaded materials will be stored.
+- **driverPath**: Path of your installed chromedriver.
 
 Ensure that `config.py` is updated with your specific details before running the tool.
 
