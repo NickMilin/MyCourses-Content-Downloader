@@ -31,7 +31,7 @@ def get_mycourses_data(driver):
     shadow_root1 = expand_shadow_element(driver, host1)
     
     # Traverse through each nested shadow root
-    host2 = WebDriverWait(shadow_root1, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses-container")))
+    host2 = WebDriverWait(shadow_root1, 40).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-my-courses-container")))
     shadow_root2 = expand_shadow_element(driver, host2)
     
     host3 = WebDriverWait(shadow_root2, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "d2l-tabs")))
@@ -105,13 +105,20 @@ def get_mycourses_data(driver):
             # 4. Expand d2l-card's shadow root
             d2l_card_shadow = expand_shadow_element(driver, d2l_card)
             # 5. Extract the link from the <a> tag inside the card's shadow DOM
-            link_element = d2l_card_shadow.find_element(By.CSS_SELECTOR, "a[href]")
-            course_url = link_element.get_attribute("href")
-            course_code = re.split('/',course_url)[-1]
-            course_codes.append(course_code)
-    
-    
-    
+            try:
+                link_element = d2l_card_shadow.find_element(By.CSS_SELECTOR, "a[href]")
+                course_url = link_element.get_attribute("href")
+                course_code = re.split('/',course_url)[-1]
+                course_codes.append(course_code)
+            except:
+                # Skip this card if no href link is found
+                print(f"Skipping card for course '{course_name}' - no href link found")
+                # Remove the course name and image URL that were already added
+                course_names.pop()
+                image_urls.pop()
+                continue
+
+
     # print(course_names)
     # print(image_urls)
     # print(course_codes)
@@ -119,23 +126,23 @@ def get_mycourses_data(driver):
     # print(len(course_names))
     # print(len(image_urls))
     # print(len(course_codes))
-    
-    
+
+
     courses_dict = {}
     for i in range(len(course_names)):
         try:
             api_url = f"https://mycourses2.mcgill.ca/d2l/api/le/unstable/{course_codes[i]}/content/toc?loadDescription=true"
-    
+
             # Navigate to API endpoint using existing session
             driver.get(api_url)
-    
+
             # Wait for content to load and get raw JSON
             WebDriverWait(driver, 2).until(
                 lambda d: d.find_element(By.TAG_NAME, "pre")
             )
             raw_json = driver.find_element(By.TAG_NAME, "pre").text
             course_data = json.loads(raw_json)
-    
+
             parser = JSONParser(course_data)
             folder = parser.get_dict()
 
@@ -146,7 +153,7 @@ def get_mycourses_data(driver):
                 }
 
             print(courses_dict[int(course_codes[i])])
-    
+
         except Exception as e:
             print(f"Failed to process {course_codes[i]}: {str(e)}")
             continue
