@@ -57,6 +57,40 @@ def fetch_json(driver, url, timeout=5):
     finally:
         driver.set_page_load_timeout(300)
 
+def get_user_id(driver):
+    """Get the authenticated user's D2L user ID via the whoami API."""
+    data = fetch_json(driver, "https://mycourses2.mcgill.ca/d2l/api/lp/unstable/users/whoami")
+    return data.get("Identifier") if data else None
+
+def fetch_assignments(driver, course_code):
+    """Fetch assignment dropbox folders and their attachments for a course."""
+    assignments = []
+
+    dropbox_folders = fetch_json(
+        driver, f"https://mycourses2.mcgill.ca/d2l/api/le/1.82/{course_code}/dropbox/folders/"
+    )
+    if not isinstance(dropbox_folders, list):
+        return assignments
+
+    for folder in dropbox_folders:
+        folder_id = folder.get("Id")
+        folder_name = folder.get("Name", f"Assignment {folder_id}")
+
+        attachments = [
+            {"file_id": att["FileId"], "file_name": att["FileName"]}
+            for att in folder.get("Attachments", [])
+        ]
+
+        # Include every dropbox folder — we'll attempt submission download
+        # during the download phase (the API won't let us check in advance)
+        assignments.append({
+            "folder_id": folder_id,
+            "folder_name": folder_name,
+            "attachments": attachments,
+        })
+
+    return assignments
+
 def get_mycourses_data(driver):
     handle_login(driver)
     time.sleep(3)
@@ -107,6 +141,9 @@ def get_mycourses_data(driver):
         return results;
     """)
 
+    # Fetch user ID now (navigates away from homepage, so must be after card extraction)
+    user_id = get_user_id(driver)
+
     courses_dict = {}
     for card in cards_data:
         course_code = card['courseCode']
@@ -132,12 +169,15 @@ def get_mycourses_data(driver):
         parser = JSONParser(course_data)
         folder = parser.get_dict()
 
-        print(f"  {course_name}: {len(folder)} content folders")
+        assignments = fetch_assignments(driver, course_code)
+        print(f"  {course_name}: {len(folder)} content folders, {len(assignments)} assignments")
 
         courses_dict[int(course_code)] = {
                 "course_name": course_name,
                 "thumbnail_link": image_url,
                 "folders": folder,
+                "assignments": assignments,
+                "user_id": user_id,
             }
 
     driver.minimize_window()

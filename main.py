@@ -86,7 +86,13 @@ def setup_selenium_driver():
 
 def total_content_for_course(course_id) -> int:
     course = course_list[course_id]
-    return sum(len(folder_content) for folder_content in course["folders"].values())
+    content_count = sum(len(folder_content) for folder_content in course["folders"].values())
+    # Each assignment folder: attachments + 1 submission download attempt
+    assignment_count = sum(
+        len(a["attachments"]) + 1
+        for a in course.get("assignments", [])
+    )
+    return content_count + assignment_count
 
 
 def total_selected_content() -> int:
@@ -200,6 +206,53 @@ def blocking_download_logic(driver, progress_data):
                 downloaded_count += 1
                 progress_data['downloaded_count'] = downloaded_count
 
+        # Download assignment files
+        user_id = cinfo.get("user_id")
+        for assignment in cinfo.get("assignments", []):
+            adir = os.path.join(cdir, "Assignments", re.sub(r'[\\/:*?"<>|]', '', assignment["folder_name"]))
+            os.makedirs(adir, exist_ok=True)
+
+            # Download instructor attachments
+            for att in assignment["attachments"]:
+                try:
+                    driver.get(
+                        f"https://mycourses2.mcgill.ca/d2l/api/le/1.82/{cid}/dropbox/folders/{assignment['folder_id']}/attachments/{att['file_id']}"
+                    )
+                    time.sleep(0.05)
+                    while any(
+                        (filename.endswith(".crdownload") or filename.endswith(".tmp"))
+                        for filename in os.listdir(tmp_dir)
+                    ):
+                        time.sleep(0.1)
+                    move_latest_file(tmp_dir, adir)
+                except Exception:
+                    pass
+                downloaded_count += 1
+                progress_data['downloaded_count'] = downloaded_count
+
+            # Attempt to download user's submissions as a zip
+            # This may fail (Not Authorized) for some courses — that's OK
+            if user_id:
+                try:
+                    files_before = set(os.listdir(tmp_dir))
+                    driver.get(
+                        f"https://mycourses2.mcgill.ca/d2l/api/le/1.82/{cid}/dropbox/folders/{assignment['folder_id']}/submissions/{user_id}/download"
+                    )
+                    time.sleep(1)
+                    while any(
+                        (filename.endswith(".crdownload") or filename.endswith(".tmp"))
+                        for filename in os.listdir(tmp_dir)
+                    ):
+                        time.sleep(0.1)
+                    files_after = set(os.listdir(tmp_dir))
+                    new_files = files_after - files_before
+                    if new_files:
+                        move_latest_file(tmp_dir, adir)
+                except Exception:
+                    pass
+            downloaded_count += 1
+            progress_data['downloaded_count'] = downloaded_count
+
     # Zip everything in tmp and remove tmp
     downloads_folder = get_downloads_folder()
     zip_path = os.path.join(downloads_folder, "combined_files.zip")
@@ -231,8 +284,15 @@ def move_latest_file(download_dir, target_dir):
 
     newest_file = max(files, key=os.path.getctime)
 
-    # Move it
-    shutil.move(newest_file, target_dir)
+    # Handle duplicate filenames by adding a counter
+    dest = os.path.join(target_dir, os.path.basename(newest_file))
+    if os.path.exists(dest):
+        name, ext = os.path.splitext(os.path.basename(newest_file))
+        counter = 1
+        while os.path.exists(dest):
+            dest = os.path.join(target_dir, f"{name} ({counter}){ext}")
+            counter += 1
+    shutil.move(newest_file, dest)
 
 def get_downloads_folder():
     if platform.system() == "Windows":
