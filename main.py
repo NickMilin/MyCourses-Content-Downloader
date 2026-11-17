@@ -1,7 +1,10 @@
 import asyncio
+import multiprocessing
 import os
 import re
 import shutil
+import sys
+import tempfile
 import threading
 import zipfile
 import platform
@@ -61,6 +64,12 @@ executor = ThreadPoolExecutor(max_workers=1)
 # HELPER FUNCTIONS
 # ------------------------------------------------------------------
 # ... [Previous imports and code remain unchanged] ...
+
+def resource_path(relative_path):
+    """Path to a bundled data file, both when run from source and inside a PyInstaller app."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, relative_path)
+
 
 def setup_selenium_driver():
     """Chrome is only used to log in. All data and files come over plain HTTP afterwards."""
@@ -197,21 +206,17 @@ def blocking_download_logic(session, progress_data):
     """All the blocking operations (HTTP downloads, zipping).
        Runs in a separate thread to keep UI responsive.
     """
-    # Set up for download
-    tmp_dir = os.path.join(os.getcwd(), "tmp")
-    os.makedirs(tmp_dir, exist_ok=True)
+    # Download into a fresh temporary folder (not the current folder, which may not be writable
+    # when the app is launched by double-clicking it)
+    tmp_dir = tempfile.mkdtemp(prefix="mycourses_")
 
-    # Clear existing files in tmp directory
-    for filename in os.listdir(tmp_dir):
-        file_path = os.path.join(tmp_dir, filename)
-        try:
-            if os.path.isfile(file_path) or os.path.islink(file_path):
-                os.unlink(file_path)
-            elif os.path.isdir(file_path):
-                shutil.rmtree(file_path)
-        except Exception as e:
-            print(f'Failed to delete {file_path}. Reason: {e}')
+    try:
+        _download_and_zip(session, progress_data, tmp_dir)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
+
+def _download_and_zip(session, progress_data, tmp_dir):
     tasks = build_download_tasks(tmp_dir)
     progress_data['total_files'] = len(tasks)
     progress_data['downloaded_count'] = 0
@@ -230,7 +235,7 @@ def blocking_download_logic(session, progress_data):
     with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
         list(pool.map(run_task, tasks))
 
-    # Zip everything in tmp and remove tmp
+    # Zip everything in tmp (the caller deletes tmp afterwards)
     downloads_folder = get_downloads_folder()
     zip_path = os.path.join(downloads_folder, "combined_files.zip")
     file_counter = 1
@@ -245,8 +250,6 @@ def blocking_download_logic(session, progress_data):
                 file_path = os.path.join(root, file_name)
                 arcname = os.path.relpath(file_path, start=tmp_dir)
                 zipf.write(file_path, arcname)
-
-    shutil.rmtree(tmp_dir)
 
     # Store final ZIP path for the success popup
     progress_data['zip_path'] = zip_path
@@ -405,6 +408,7 @@ def setup_ui():
             .props('color=primary')
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()  # needed when packaged as an executable
     http_session = login()
     course_list = MyCoursesScraper.get_mycourses_data(http_session)
 
@@ -413,4 +417,5 @@ if __name__ == "__main__":
     setup_ui()
 
     update_status()  # Make sure initial text is correct
-    ui.run(title="MyCourses Downloads", favicon="static/my_favicon.ico", reload=False)
+    # host=127.0.0.1: only this computer can open the page (it holds your McGill login)
+    ui.run(title="MyCourses Downloads", favicon=resource_path("static/my_favicon.ico"), reload=False, host="127.0.0.1")

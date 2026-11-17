@@ -1,0 +1,49 @@
+name: Build executables
+
+# Run by hand from the Actions tab, or by pushing a version tag such as v1.0.0.
+# Tagged builds are attached to a GitHub Release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: macOS
+          - os: ubuntu-latest
+            name: Linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install nicegui==2.10.1 selenium==4.28.1 requests==2.32.3 pyinstaller
+      - name: Build
+        run: pyinstaller MyCoursesDownloader.spec
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/MyCoursesDownloader.exe -DestinationPath MyCoursesDownloader-${{ matrix.name }}.zip
+      - name: Package (macOS and Linux)
+        if: runner.os != 'Windows'
+        # tar keeps the executable permission bit, which zip would drop
+        run: tar -czf MyCoursesDownloader-${{ matrix.name }}.tar.gz -C dist MyCoursesDownloader
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyCoursesDownloader-${{ matrix.name }}
+          path: MyCoursesDownloader-${{ matrix.name }}.*
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MyCoursesDownloader-${{ matrix.name }}.*
+    permissions:
+      contents: write
