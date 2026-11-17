@@ -429,10 +429,9 @@ def setup_ui():
                     ):
                         ui.label(f"{content_count} file{'s' if content_count != 1 else ''}")
 
+                # Wrap long names (e.g. cross-listed courses) instead of cutting them off with "..."
                 ui.label(course_info['course_name']) \
-                    .classes(
-                    'text-lg font-semibold truncate overflow-hidden whitespace-nowrap w-[256px] pb-[16px] pl-[8px] pr-[8px]') \
-                    .style('text-overflow: ellipsis;')
+                    .classes('text-base font-semibold w-[256px] pb-[16px] pl-[8px] pr-[8px] break-words')
 
                 card_frame.on('click', lambda e, cid=course_id, cf=card_frame: toggle_selection(cid, cf))
 

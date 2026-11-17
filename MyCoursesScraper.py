@@ -8,20 +8,6 @@ from selenium.webdriver.common.by import By
 
 import time
 
-# JS helper to find elements across nested shadow DOM boundaries
-FIND_IN_SHADOW_JS = """
-function findInShadow(root, selector, depth) {
-    if (depth > 10) return [];
-    let results = Array.from(root.querySelectorAll(selector));
-    for (const el of root.querySelectorAll('*')) {
-        if (el.shadowRoot) {
-            results = results.concat(findInShadow(el.shadowRoot, selector, depth + 1));
-        }
-    }
-    return results;
-}
-"""
-
 def handle_login(driver):
     website = 'https://mycourses2.mcgill.ca/d2l/loginh/'
     driver.get(website)
@@ -91,57 +77,56 @@ def fetch_assignments(driver, course_code):
 
     return assignments
 
+# Runs inside the logged-in page. Lists every course offering via the enrollments API
+# (names come back clean, no card scraping) and embeds each thumbnail as a data URI,
+# because the image endpoint needs the McGill session cookie and the local UI page
+# (127.0.0.1) does not have it.
+FETCH_ENROLLMENTS_JS = """
+const done = arguments[arguments.length - 1];
+(async () => {
+    const items = [];
+    let bookmark = '';
+    for (let page = 0; page < 50; page++) {
+        const url = '/d2l/api/lp/1.47/enrollments/myenrollments/?orgUnitTypeId=3'
+            + (bookmark ? '&bookmark=' + encodeURIComponent(bookmark) : '');
+        const r = await fetch(url, {credentials: 'include'});
+        if (!r.ok) break;
+        const j = await r.json();
+        items.push(...j.Items);
+        if (!j.PagingInfo.HasMoreItems) break;
+        bookmark = j.PagingInfo.Bookmark;
+    }
+
+    const toDataUri = blob => new Promise(resolve => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => resolve('');
+        fr.readAsDataURL(blob);
+    });
+
+    const results = await Promise.all(items.map(async item => {
+        let imageUrl = '';
+        try {
+            const r = await fetch(
+                '/d2l/api/lp/1.47/courses/' + item.OrgUnit.Id + '/image?autoSelectImage=true',
+                {credentials: 'include'}
+            );
+            if (r.ok) imageUrl = await toDataUri(await r.blob());
+        } catch (e) {}
+        return {courseCode: String(item.OrgUnit.Id), courseName: item.OrgUnit.Name, imageUrl: imageUrl};
+    }));
+    done(results);
+})().catch(e => done([]));
+"""
+
 def get_mycourses_data(driver):
     handle_login(driver)
-    time.sleep(3)
+    time.sleep(1)
 
-    # Click all semester tabs to trigger lazy loading of enrollment cards
-    driver.execute_script(FIND_IN_SHADOW_JS + """
-        const tabs = findInShadow(document, 'd2l-tab', 0);
-        for (const tab of tabs) {
-            tab.click();
-        }
-    """)
+    driver.set_script_timeout(120)
+    cards_data = driver.execute_async_script(FETCH_ENROLLMENTS_JS)
 
-    time.sleep(3)
-
-    # Extract enrollment card data via JS traversal of shadow DOMs
-    cards_data = driver.execute_script(FIND_IN_SHADOW_JS + """
-        const cards = findInShadow(document, 'd2l-my-courses-enrollment-card', 0);
-        const results = [];
-        const seenIds = new Set();
-
-        for (const card of cards) {
-            const sr = card.shadowRoot;
-            if (!sr) continue;
-
-            const d2lCard = sr.querySelector('d2l-card');
-            if (!d2lCard) continue;
-
-            const href = d2lCard.getAttribute('href') || '';
-            const courseCode = href.split('/').pop();
-
-            if (!courseCode || seenIds.has(courseCode)) continue;
-            seenIds.add(courseCode);
-
-            // Prefer the 'text' attribute (clean), fall back to normalized textContent
-            const courseName = d2lCard.getAttribute('text')
-                || d2lCard.textContent.replace(/\\s+/g, ' ').trim();
-
-            const img = sr.querySelector('img');
-            const imgSrc = img ? img.getAttribute('src') : '';
-
-            results.push({
-                courseCode: courseCode,
-                courseName: courseName,
-                imageUrl: imgSrc
-            });
-        }
-
-        return results;
-    """)
-
-    # Fetch user ID now (navigates away from homepage, so must be after card extraction)
+    # Fetch user ID now (navigates away from the homepage, so it must come after the enrollments call)
     user_id = get_user_id(driver)
 
     courses_dict = {}
@@ -150,14 +135,12 @@ def get_mycourses_data(driver):
         raw_name = card['courseName']
         image_url = card['imageUrl']
 
-        # Clean up course name: "Closed, Winter 2026 - MATH-340 - Title, 3216.202601, ..."
-        # → "Winter 2026 - MATH-340 - Title"
-        cleaned = re.sub(r'^Closed,\s*', '', raw_name)
-        match = re.match(r'(.+?),?\s+\d+\.\d+', cleaned)
-        course_name = match.group(1) if match else cleaned
+        # Collapse stray whitespace/newlines that appear in some course names
+        course_name = re.sub(r'\s+', ' ', raw_name).strip()
 
-        if image_url and not image_url.startswith('http'):
-            image_url = 'https://mycourses2.mcgill.ca' + image_url
+        # Only real courses (as in the original version); skips orgs like "It Takes All of Us"
+        if not any(term in course_name for term in ('Winter', 'Fall', 'Summer')):
+            continue
 
         course_data = fetch_json(
             driver, f"https://mycourses2.mcgill.ca/d2l/api/le/unstable/{course_code}/content/toc?loadDescription=true"
