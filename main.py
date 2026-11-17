@@ -2,20 +2,16 @@ import asyncio
 import os
 import re
 import shutil
-import time
+import threading
 import zipfile
 import platform
 from concurrent.futures import ThreadPoolExecutor
 
 from nicegui import ui
 from selenium import webdriver
-from selenium.common import NoSuchWindowException
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
 import config
+import d2l_http
 import MyCoursesScraper
 # FRONTEND
 
@@ -30,7 +26,7 @@ course_list = {}
 selected_courses = set()
 card_frames = {}
 is_all_selected = False
-sel_driver = None
+http_session = None  # requests.Session holding the McGill login cookies
 
 # ------------------------------------------------------------------
 # UI ELEMENTS
@@ -52,7 +48,11 @@ progress_data = {
     'downloaded_count': 0,
     'total_files': 0,
     'zip_path': '',  # Will store the final ZIP path for the success dialog
+    'failed': [],  # Names of files the server refused to give us
 }
+
+# How many files to download at the same time
+DOWNLOAD_WORKERS = 4
 
 # We'll use a global executor for the blocking calls
 executor = ThreadPoolExecutor(max_workers=1)
@@ -63,16 +63,8 @@ executor = ThreadPoolExecutor(max_workers=1)
 # ... [Previous imports and code remain unchanged] ...
 
 def setup_selenium_driver():
-    tmp_dir = os.path.join(os.getcwd(), "tmp")
-
+    """Chrome is only used to log in. All data and files come over plain HTTP afterwards."""
     options = webdriver.ChromeOptions()
-    prefs = {
-        "download.default_directory": tmp_dir,
-        "download.prompt_for_download": False,
-        "directory_upgrade": True,
-        "detach": True
-    }
-    options.add_experimental_option("prefs", prefs)
 
     # Add macOS specific options to handle permissions and browser setup
     options.add_argument("--no-sandbox")  # Bypass OS security model
@@ -80,9 +72,23 @@ def setup_selenium_driver():
 
     path = config.driverPath  # Ensure this points to the correct chromedriver path on macOS
     service = Service(path)
-    driver = webdriver.Chrome(service=service, options=options)
+    return webdriver.Chrome(service=service, options=options)
 
-    return driver
+
+def login():
+    """Open Chrome, let the user log in, and return an HTTP session with their cookies."""
+    driver = setup_selenium_driver()
+    try:
+        return MyCoursesScraper.login_and_get_session(driver)
+    finally:
+        driver.quit()
+
+
+def ensure_session():
+    """Log in again if the saved cookies have expired."""
+    global http_session
+    if not d2l_http.session_is_valid(http_session):
+        http_session = login()
 
 def total_content_for_course(course_id) -> int:
     course = course_list[course_id]
@@ -150,8 +156,45 @@ def toggle_all_courses():
 
     update_status()
 
-def blocking_download_logic(driver, progress_data):
-    """All the blocking operations (Selenium, file-moving, zipping).
+def build_download_tasks(tmp_dir):
+    """List every file to fetch as (url path, destination folder, fallback filename, required)."""
+    tasks = []
+    for cid in selected_courses:
+        cinfo = course_list[cid]
+        cdir = os.path.join(tmp_dir, d2l_http.safe_name(cinfo["course_name"]))
+
+        for folder_name, file_ids in cinfo["folders"].items():
+            fdir = os.path.join(cdir, d2l_http.safe_name(folder_name))
+            for file_id in file_ids:
+                tasks.append((
+                    f"/d2l/le/content/{cid}/topics/files/download/{file_id}/DirectFileTopicDownload",
+                    fdir, f"file_{file_id}", True,
+                ))
+
+        user_id = cinfo.get("user_id")
+        for assignment in cinfo.get("assignments", []):
+            adir = os.path.join(cdir, "Assignments", d2l_http.safe_name(assignment["folder_name"]))
+            folder_id = assignment["folder_id"]
+
+            # Instructor attachments
+            for att in assignment["attachments"]:
+                tasks.append((
+                    f"/d2l/api/le/1.82/{cid}/dropbox/folders/{folder_id}/attachments/{att['file_id']}",
+                    adir, att["file_name"], True,
+                ))
+
+            # The user's own submissions as a zip. The server answers 403 when nothing was
+            # submitted or the course hides it, so a refusal here is not an error.
+            if user_id:
+                tasks.append((
+                    f"/d2l/api/le/1.82/{cid}/dropbox/folders/{folder_id}/submissions/{user_id}/download",
+                    adir, f"submission_{folder_id}.zip", False,
+                ))
+    return tasks
+
+
+def blocking_download_logic(session, progress_data):
+    """All the blocking operations (HTTP downloads, zipping).
        Runs in a separate thread to keep UI responsive.
     """
     # Set up for download
@@ -169,89 +212,23 @@ def blocking_download_logic(driver, progress_data):
         except Exception as e:
             print(f'Failed to delete {file_path}. Reason: {e}')
 
-    # Local references
-    total_files = progress_data['total_files']
-    downloaded_count = 0
+    tasks = build_download_tasks(tmp_dir)
+    progress_data['total_files'] = len(tasks)
+    progress_data['downloaded_count'] = 0
+    progress_data['failed'] = []
+    progress_lock = threading.Lock()
 
-    for cid in selected_courses:
-        cinfo = course_list[cid]
-        # Clean folder names (preserve dots)
-        cdir = os.path.join(tmp_dir, re.sub(r'[\\/:*?"<>|]', '', cinfo["course_name"]))  # Removed dot from regex
-        os.makedirs(cdir, exist_ok=True)
+    def run_task(task):
+        path, dest_dir, fallback_name, required = task
+        saved = d2l_http.download_file(session, path, dest_dir, fallback_name)
+        with progress_lock:
+            if saved is None and required:
+                progress_data['failed'].append(os.path.join(os.path.relpath(dest_dir, tmp_dir), fallback_name))
+            # One more file completed; update progress
+            progress_data['downloaded_count'] += 1
 
-        for folder_name, folder_info in cinfo["folders"].items():
-            # Clean folder names (preserve dots)
-            fdir = os.path.join(cdir, re.sub(r'[\\/:*?"<>|]', '', folder_name))  # Removed dot from regex
-            os.makedirs(fdir, exist_ok=True)
-
-            for file_id in folder_info:
-                # Instruct Selenium to download the file
-                driver.get(
-                    f"https://mycourses2.mcgill.ca/d2l/le/content/{cid}/topics/files/download/{file_id}/DirectFileTopicDownload"
-                )
-
-                # Add a sleep to allow files to download
-                time.sleep(0.05)
-                # Wait until the browser finishes partial downloads
-                while any(
-                    (filename.endswith(".crdownload") or filename.endswith(".tmp"))
-                    for filename in os.listdir(tmp_dir)
-                ):
-                    time.sleep(0.1)  # Slightly longer sleep to reduce CPU usage
-
-                # Move the downloaded file from tmp_dir to the correct folder
-                move_latest_file(tmp_dir, fdir)
-
-                # One more file completed; update progress
-                downloaded_count += 1
-                progress_data['downloaded_count'] = downloaded_count
-
-        # Download assignment files
-        user_id = cinfo.get("user_id")
-        for assignment in cinfo.get("assignments", []):
-            adir = os.path.join(cdir, "Assignments", re.sub(r'[\\/:*?"<>|]', '', assignment["folder_name"]))
-            os.makedirs(adir, exist_ok=True)
-
-            # Download instructor attachments
-            for att in assignment["attachments"]:
-                try:
-                    driver.get(
-                        f"https://mycourses2.mcgill.ca/d2l/api/le/1.82/{cid}/dropbox/folders/{assignment['folder_id']}/attachments/{att['file_id']}"
-                    )
-                    time.sleep(0.05)
-                    while any(
-                        (filename.endswith(".crdownload") or filename.endswith(".tmp"))
-                        for filename in os.listdir(tmp_dir)
-                    ):
-                        time.sleep(0.1)
-                    move_latest_file(tmp_dir, adir)
-                except Exception:
-                    pass
-                downloaded_count += 1
-                progress_data['downloaded_count'] = downloaded_count
-
-            # Attempt to download user's submissions as a zip
-            # This may fail (Not Authorized) for some courses — that's OK
-            if user_id:
-                try:
-                    files_before = set(os.listdir(tmp_dir))
-                    driver.get(
-                        f"https://mycourses2.mcgill.ca/d2l/api/le/1.82/{cid}/dropbox/folders/{assignment['folder_id']}/submissions/{user_id}/download"
-                    )
-                    time.sleep(1)
-                    while any(
-                        (filename.endswith(".crdownload") or filename.endswith(".tmp"))
-                        for filename in os.listdir(tmp_dir)
-                    ):
-                        time.sleep(0.1)
-                    files_after = set(os.listdir(tmp_dir))
-                    new_files = files_after - files_before
-                    if new_files:
-                        move_latest_file(tmp_dir, adir)
-                except Exception:
-                    pass
-            downloaded_count += 1
-            progress_data['downloaded_count'] = downloaded_count
+    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+        list(pool.map(run_task, tasks))
 
     # Zip everything in tmp and remove tmp
     downloads_folder = get_downloads_folder()
@@ -275,25 +252,6 @@ def blocking_download_logic(driver, progress_data):
     progress_data['zip_path'] = zip_path
 
 
-def move_latest_file(download_dir, target_dir):
-    # Find the newest file in the directory
-    files = [os.path.join(download_dir, f) for f in os.listdir(download_dir)]
-    files = [f for f in files if os.path.isfile(f)]
-    if not files:
-        return  # No file found
-
-    newest_file = max(files, key=os.path.getctime)
-
-    # Handle duplicate filenames by adding a counter
-    dest = os.path.join(target_dir, os.path.basename(newest_file))
-    if os.path.exists(dest):
-        name, ext = os.path.splitext(os.path.basename(newest_file))
-        counter = 1
-        while os.path.exists(dest):
-            dest = os.path.join(target_dir, f"{name} ({counter}){ext}")
-            counter += 1
-    shutil.move(newest_file, dest)
-
 def get_downloads_folder():
     if platform.system() == "Windows":
         return os.path.join(os.environ['USERPROFILE'], "Downloads")
@@ -313,8 +271,6 @@ def extract_course_code(course_name):
 # ASYNC HANDLER FOR DOWNLOAD
 # ------------------------------------------------------------------
 async def download_files_async():
-    global sel_driver
-
     """Called when user clicks the download button; runs the blocking logic on a thread."""
     if not selected_courses:
         print("No courses selected for download.")
@@ -325,23 +281,21 @@ async def download_files_async():
     progress_data['downloaded_count'] = 0
     progress_data['total_files'] = total_selected_content()
     progress_data['zip_path'] = ''
+    progress_data['failed'] = []
 
     show_downloading_modal()
 
     # Run the blocking logic in a thread
     loop = asyncio.get_event_loop()
     try:
-        await loop.run_in_executor(executor, blocking_download_logic, sel_driver, progress_data)
-    except NoSuchWindowException:
-        sel_driver = setup_selenium_driver()
-        host1 = MyCoursesScraper.handle_login(sel_driver)
-        sel_driver.minimize_window()
-        await loop.run_in_executor(executor, blocking_download_logic, sel_driver, progress_data)
+        # If the login expired, this reopens Chrome so the user can log in again
+        await loop.run_in_executor(executor, ensure_session)
+        await loop.run_in_executor(executor, blocking_download_logic, http_session, progress_data)
+    finally:
+        hide_downloading_modal()
+        progress_data['in_progress'] = False
 
-    # Clean up
-    hide_downloading_modal()
-    show_success_modal(progress_data['zip_path'])
-    progress_data['in_progress'] = False
+    show_success_modal(progress_data['zip_path'], progress_data['failed'])
 
 # ------------------------------------------------------------------
 # TIMED UPDATE: PROGRESS BAR
@@ -376,11 +330,16 @@ def show_downloading_modal():
 def hide_downloading_modal():
     downloading_modal.close()
 
-def show_success_modal(zip_path):
-    success_label.text = (
+def show_success_modal(zip_path, failed):
+    message = (
         "All files have been downloaded and zipped!\n\n"
         f"ZIP is located at:\n{zip_path}"
     )
+    if failed:
+        shown = "\n".join(failed[:10])
+        more = f"\n...and {len(failed) - 10} more" if len(failed) > 10 else ""
+        message += f"\n\n{len(failed)} file(s) could not be downloaded:\n{shown}{more}"
+    success_label.text = message
     success_modal.open()
 
 # ------------------------------------------------------------------
@@ -446,10 +405,10 @@ def setup_ui():
             .props('color=primary')
 
 if __name__ == "__main__":
-    sel_driver = setup_selenium_driver()
-    course_list = MyCoursesScraper.get_mycourses_data(sel_driver)
+    http_session = login()
+    course_list = MyCoursesScraper.get_mycourses_data(http_session)
 
-    print(course_list)
+    print(f"Loaded {len(course_list)} courses")
 
     setup_ui()
 
